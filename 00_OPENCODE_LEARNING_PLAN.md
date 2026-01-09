@@ -6,7 +6,7 @@
 
 ### 1. System Prompt 系统 (重点学习)
 
-**System Prompt 构建流程** (`packages/opencode/src/session/prompt.ts:593-612`)
+**System Prompt 构建流程** (`packages/opencode/src/session/prompt.ts`)
 
 ```
 System Prompt 组成:
@@ -42,10 +42,10 @@ System Prompt 组成:
 | 文件               | 路径                                                 | 用途                |
 | ------------------ | ---------------------------------------------------- | ------------------- |
 | Provider Prompt    | `packages/opencode/src/session/prompt/anthropic.txt` | Claude 系统提示     |
-| Agent 定义         | `packages/opencode/src/agent/agent.ts:60-198`        | Agent 配置与 prompt |
+| Agent 定义         | `packages/opencode/src/agent/agent.ts`        | Agent 配置与 prompt |
 | Agent Prompt       | `packages/opencode/src/agent/prompt/*.txt`           | 专用 agent 提示词   |
 | System Prompt 构建 | `packages/opencode/src/session/system.ts`            | Prompt 组装逻辑     |
-| Prompt 处理        | `packages/opencode/src/session/prompt.ts:593-612`    | LLM 调用时注入      |
+| Prompt 处理        | `packages/opencode/src/session/prompt.ts`    | LLM 调用时注入      |
 
 ---
 
@@ -97,29 +97,31 @@ System Prompt 组成:
 
 | 文件           | 路径                                        | 说明                       |
 | -------------- | ------------------------------------------- | -------------------------- |
-| **权限核心**   | `src/permission/next.ts`                    | PermissionNext 命名空间    |
-| **旧权限**     | `src/permission/index.ts`                   | Permission 命名空间 (旧版) |
-| **Arity 计算** | `src/permission/arity.ts`                   | bash 命令参数分组          |
-| **权限 UI**    | `cli/cmd/tui/routes/session/permission.tsx` | TUI 权限对话框             |
-| **Bus 事件**   | `cli/cmd/tui/context/sync.tsx`              | 事件同步                   |
+| **权限核心**   | `packages/opencode/src/permission/next.ts`          | PermissionNext 命名空间    |
+| **旧权限**     | `packages/opencode/src/permission/index.ts`         | Permission 命名空间 (旧版) |
+| **Arity 计算** | `packages/opencode/src/permission/arity.ts`         | bash 命令参数分组          |
+| **权限 UI**    | `packages/opencode/src/cli/cmd/tui/routes/session/permission.tsx` | TUI 权限对话框             |
+| **Bus 事件**   | `packages/opencode/src/cli/cmd/tui/context/sync.tsx` | 事件同步                   |
 
 **权限类型:**
 
 ```typescript
-// 支持的权限类型 (permission.tsx:183-224)
-;-edit - // 文件编辑
+// 支持的权限类型
+  edit - // 文件编辑 (包含创建和修改)
   read - // 文件读取
-  write - // 文件写入
   glob - // 文件 glob
   grep - // 代码搜索
-  ls / list - // 目录列表
+  list - // 目录列表
   bash - // 命令执行
   task - // 子 agent 调用
+  todoread - // 待办事项读取
+  todowrite - // 待办事项写入
+  question - // 向用户提问
   webfetch - // 网页抓取
   websearch - // 网络搜索
   codesearch - // 代码搜索
   external_directory - // 外部目录
-  doom_loop // 死循环检测
+  doom_loop - // 死循环检测
 ```
 
 **权限动作:**
@@ -130,7 +132,7 @@ Action = "allow" | "deny" | "ask"
 // Reply = "once" | "always" | "reject"
 ```
 
-**Agent 权限配置示例** (`agent.ts:43-57`):
+**Agent 权限配置示例** (`packages/opencode/src/agent/agent.ts`):
 
 ```typescript
 const defaults = PermissionNext.fromConfig({
@@ -146,7 +148,7 @@ const defaults = PermissionNext.fromConfig({
 })
 ```
 
-**工具调用权限请求示例** (`tool/bash.ts:136-152`):
+**工具调用权限请求示例** (`packages/opencode/src/tool/bash.ts`):
 
 ```typescript
 // 请求外部目录访问权限
@@ -171,7 +173,7 @@ await ctx.ask({
 ### 3. Agent 系统 (`packages/opencode/src/agent/`)
 
 ```typescript
-// Agent 定义示例 (agent.ts:61-83)
+// Agent 定义示例 (packages/opencode/src/agent/agent.ts)
 build: {
   name: "build"
   mode: "primary"      // primary/subagent/all
@@ -258,7 +260,7 @@ export const ReadTool = Tool.define("read", async (ctx) => {
 **核心实现：**
 
 ```typescript
-// processor.ts:48-164 - 处理器主循环
+// processor.ts - 处理器主循环
 async process(streamInput: LLM.StreamInput) {
   while (true) {  // 外层循环：迭代决策
     const stream = await LLM.stream(streamInput)
@@ -277,7 +279,7 @@ async process(streamInput: LLM.StreamInput) {
   }
 }
 
-// 死循环检测 (processor.ts:19, 143-156)
+// 死循环检测
 const DOOM_LOOP_THRESHOLD = 3
 if (lastThree.length === DOOM_LOOP_THRESHOLD &&
     all_same_tool_calls &&
@@ -302,17 +304,21 @@ if (lastThree.length === DOOM_LOOP_THRESHOLD &&
 **Explore Agent 专用探索：**
 
 ```typescript
-// agent.ts:103-128 - 专为快速探索优化的 Agent
+// packages/opencode/src/agent/agent.ts - 专为快速探索优化的 Agent
 explore: {
   name: "explore",
   mode: "subagent",
   permission: PermissionNext.merge(defaults, {
-    "*": "deny",        // 禁止所有操作
-    grep: "allow",      // 显式允许搜索
-    glob: "allow",      // 允许文件匹配
-    read: "allow",      // 允许读取
-    list: "allow",      // 允许目录列表
-    bash: "allow",      // 允许命令
+    "*": "deny",            // 禁止所有操作
+    grep: "allow",          // 显式允许搜索
+    glob: "allow",          // 允许文件匹配
+    read: "allow",          // 允许读取
+    list: "allow",          // 允许目录列表
+    bash: "allow",          // 允许命令
+    codesearch: "allow",    // 允许代码搜索
+    external_directory: {   // 允许外部目录访问
+      [Truncate.DIR]: "allow",
+    },
     webfetch: "allow",
     websearch: "allow",
   }),
@@ -325,12 +331,12 @@ explore: {
 
 | 文件 | 关键函数/行号 | 说明 |
 |------|--------------|------|
-| `processor.ts:48-164` | `process()` 主循环 | 迭代决策核心 |
-| `processor.ts:143-156` | 死循环检测 | `DOOM_LOOP_THRESHOLD` |
-| `tool/grep.ts` | grep 工具 | 代码搜索 |
-| `tool/glob.ts` | glob 工具 | 文件发现 |
-| `tool/read.ts` | read 工具 | 内容读取 |
-| `agent/agent.ts:103-128` | explore agent | 专用探索 |
+| `packages/opencode/src/session/processor.ts` | `process()` 主循环 | 迭代决策核心 |
+| `packages/opencode/src/session/processor.ts` | 死循环检测 | `DOOM_LOOP_THRESHOLD` |
+| `packages/opencode/src/tool/grep.ts` | grep 工具 | 代码搜索 |
+| `packages/opencode/src/tool/glob.ts` | glob 工具 | 文件发现 |
+| `packages/opencode/src/tool/read.ts` | read 工具 | 内容读取 |
+| `packages/opencode/src/agent/agent.ts` | explore agent | 专用探索 |
 
 ---
 
@@ -377,13 +383,13 @@ description: use this when asked to test skill
    cat packages/opencode/src/session/prompt/beast.txt
    ```
 
-   - 阅读 `system.ts` 了解 header/environment/custom 如何组合
-   - 阅读 `prompt.ts:593-612` 了解如何注入到 LLM 调用
+   - 阅读 `packages/opencode/src/session/system.ts` 了解 header/environment/custom 如何组合
+   - 阅读 `packages/opencode/src/session/prompt.ts` 了解如何注入到 LLM 调用
 
 2. **权限系统基础**
-   - 阅读 `permission/next.ts` 理解核心逻辑
+   - 阅读 `packages/opencode/src/permission/next.ts` 理解核心逻辑
    - 理解 `ask()` → `evaluate()` → 决策流程
-   - 学习 TUI 权限对话框 (`permission.tsx`)
+   - 学习 TUI 权限对话框 (`packages/opencode/src/cli/cmd/tui/routes/session/permission.tsx`)
 
 3. **实践**
    - 修改 `AGENTS.md` 添加项目规范
@@ -392,7 +398,7 @@ description: use this when asked to test skill
 ### 第二阶段：Agent + Tool 定制 (1周)
 
 1. **学习 Agent 定义**
-   - 阅读 `agent.ts:60-198` 理解 build/plan/explore agent
+   - 阅读 `packages/opencode/src/agent/agent.ts` 理解 build/plan/explore agent
    - 理解 permission 系统与 agent 的关联
 
 2. **创建自定义 Agent**
@@ -407,7 +413,7 @@ description: use this when asked to test skill
 ### 第三阶段：Tool 迭代与探索 (3-5天)
 
 1. **迭代信息收集模式**
-   - 阅读 `processor.ts:48-164` 理解主循环
+   - 阅读 `packages/opencode/src/session/processor.ts` 理解主循环
    - 理解 `while(true)` + `for await` 双层循环
    - 学习死循环检测机制 (`DOOM_LOOP_THRESHOLD`)
    - 理解 LLM 如何决定探索还是行动
@@ -418,14 +424,14 @@ description: use this when asked to test skill
    - 掌握迭代决策流程
 
 3. **Explore Agent**
-   - 阅读 `agent.ts:103-128` 理解专用探索 Agent
+   - 阅读 `packages/opencode/src/agent/agent.ts` 理解专用探索 Agent
    - 理解白名单权限模式 (`*": "deny"`)
    - 学习 `task` 工具调用 sub-agent
 
 ### 第四阶段：Skill 系统 (3-5天)
 
 1. **Skill 发现机制**
-   - 阅读 `skill.ts:41-115` 扫描逻辑
+   - 阅读 `packages/opencode/src/skill/skill.ts` 扫描逻辑
    - 理解 `.claude/skills/` 和 `.opencode/skill/` 优先级
 
 2. **编写自定义 Skill**
@@ -433,7 +439,7 @@ description: use this when asked to test skill
    - 定义 name/description/frontmatter
 
 3. **Skill 工具集成**
-   - 阅读 `tool/skill.ts` 理解加载执行流程
+   - 阅读 `packages/opencode/src/tool/skill.ts` 理解加载执行流程
 
 ### 第五阶段：高级特性 (2周)
 
@@ -475,36 +481,36 @@ description: use this when asked to test skill
 ### System Prompt 核心
 
 ```
-├── src/session/system.ts              # Prompt 组装
-├── src/session/prompt.ts:593-612      # LLM 调用注入点
-├── src/agent/agent.ts                 # Agent 定义
-└── src/session/prompt/*.txt           # Provider/Agent prompts
+├── packages/opencode/src/session/system.ts              # Prompt 组装
+├── packages/opencode/src/session/prompt.ts              # LLM 调用注入点
+├── packages/opencode/src/agent/agent.ts                 # Agent 定义
+└── packages/opencode/src/session/prompt/*.txt           # Provider/Agent prompts
 ```
 
 ### 权限系统核心
 
 ```
-├── src/permission/next.ts             # PermissionNext 核心 (270行)
-├── src/permission/index.ts            # 旧版 Permission
-├── src/permission/arity.ts            # BashArity 命令分组
-├── src/cli/cmd/tui/routes/session/permission.tsx  # TUI 权限UI
-└── src/cli/cmd/tui/context/sync.tsx   # 权限事件同步
+├── packages/opencode/src/permission/next.ts             # PermissionNext 核心
+├── packages/opencode/src/permission/index.ts            # 旧版 Permission
+├── packages/opencode/src/permission/arity.ts            # BashArity 命令分组
+├── packages/opencode/src/cli/cmd/tui/routes/session/permission.tsx  # TUI 权限UI
+└── packages/opencode/src/cli/cmd/tui/context/sync.tsx   # 权限事件同步
 ```
 
 ### Skill 系统
 
 ```
-├── src/skill/skill.ts                 # Skill 发现
-├── src/tool/skill.ts                  # Skill 工具
+├── packages/opencode/src/skill/skill.ts                 # Skill 发现
+├── packages/opencode/src/tool/skill.ts                  # Skill 工具
 └── .opencode/skill/*/SKILL.md         # Skill 定义
 ```
 
 ### Tool 系统
 
 ```
-├── src/tool/tool.ts                   # Tool 接口定义
-├── src/tool/registry.ts               # 工具注册表
-└── src/tool/*.ts                      # 具体工具实现
+├── packages/opencode/src/tool/tool.ts                   # Tool 接口定义
+├── packages/opencode/src/tool/registry.ts               # 工具注册表
+└── packages/opencode/src/tool/*.ts                      # 具体工具实现
 ```
 
 ---
