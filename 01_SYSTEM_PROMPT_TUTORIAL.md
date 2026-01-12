@@ -1,23 +1,23 @@
 # OpenCode System Prompt 系统学习教程
 
-> 本教程旨在深入理解 OpenCode 的 System Prompt 系统，通过源码分析和实践演练，帮助读者掌握 Agent开发中System Prompt 的架构设计、实现细节。
+> 本教程旨在深入理解 OpenCode 的 System Prompt 系统，通过源码分析，帮助读者掌握 Agent开发中System Prompt 的架构设计、实现细节。
 
 ---
 
 ## 目录
 
-| 章节 | 标题 |
-|------|------|
-| 一 | 系统概述 |
-| 二 | 核心架构分析 |
-| 三 | Provider 特定 Prompt |
-| 四 | 环境信息注入 |
-| 五 | 自定义规则加载 |
-| 六 | Prompt 注入流程 |
-| 七 | Agent 特定 Prompt |
-| 八 | 实践演练 |
-| 九 | 高级定制 |
-| 十 | 常见问题 |
+| 章节 | 标题                 |
+| ---- | -------------------- |
+| 一   | 系统概述             |
+| 二   | 核心架构分析         |
+| 三   | Provider 特定 Prompt |
+| 四   | 环境信息注入         |
+| 五   | 自定义规则加载       |
+| 六   | Prompt 注入流程      |
+| 七   | Agent 特定 Prompt    |
+| 八   | 实践演练             |
+| 九   | 高级定制             |
+| 十   | 常见问题             |
 
 ---
 
@@ -39,52 +39,58 @@
 
 在 OpenCode 中，一个完整的 System Prompt 由以下 **四个核心部分** 组成：
 
-| 部分 | 说明 |
-|------|------|
-| **Provider 特定提示** | 根据模型提供商选择对应的提示模板 |
-| **环境信息** | 动态注入运行环境的上下文 |
-| **自定义规则** | 从多个来源加载用户/项目级别的配置指令 |
-| **Agent 特定提示** | 根据 Agent 类型注入额外的指令 |
+| 部分                  | 说明                                  |
+| --------------------- | ------------------------------------- |
+| **Provider 特定提示** | 根据模型提供商选择对应的提示模板      |
+| **环境信息**          | 动态注入运行环境的上下文              |
+| **自定义规则**        | 从多个来源加载用户/项目级别的配置指令 |
+| **Agent 特定提示**    | 根据 Agent 类型注入额外的指令         |
+
+**分层结构图**：
+
+```
+System Prompt 组成:
+├── Provider 特定 prompt
+│   ├── anthropic.txt - Claude 系列模型
+│   ├── beast.txt - GPT-4/o 系列模型
+│   ├── gemini.txt - Google 模型
+│   ├── codex.txt - Codex/GPT-5 模型
+│   └── qwen.txt - Qwen 等其他模型
+│
+├── 环境信息 (SystemPrompt.environment)
+│   ├── 工作目录
+│   ├── Git 仓库状态
+│   ├── 平台信息
+│   └── 当前日期
+│
+├── 自定义规则 (SystemPrompt.custom)
+│   ├── 项目级: AGENTS.md, CLAUDE.md, CONTEXT.md
+│   ├── 全局级: ~/.claude/CLAUDE.md
+│   ├── 配置指令: config.instructions
+│   └── URL 远程规则
+│
+└── Agent 特定 prompt
+    ├── build: 默认开发 agent
+    ├── plan: 只读计划模式
+    ├── explore: 代码探索 agent
+    ├── general: 通用子 agent
+    └── 自定义 agent
+```
 
 这四个部分在运行时被组装成一个数组，作为系统消息传递给大语言模型。
 
-**注入逻辑源码** (`packages/opencode/src/session/prompt.ts:591-610`)：
-
-```typescript
-const result = await processor.process({
-  user: lastUser,
-  agent,
-  abort,
-  sessionID,
-  system: [...(await SystemPrompt.environment()), ...(await SystemPrompt.custom())],
-  messages: [
-    ...MessageV2.toModelMessage(sessionMessages),
-    ...(isLastStep
-      ? [
-          {
-            role: "assistant" as const,
-            content: MAX_STEPS,
-          },
-        ]
-      : []),
-  ],
-  tools,
-  model,
-})
-```
-
-从这段代码可以看出，`environment()` 和 `custom()` 两部分被合并后传递给 `processor.process` 方法。
+**注入逻辑源码**（见 `packages/opencode/src/session/prompt.ts`）：
 
 ### 1.3 核心文件概览
 
 要深入理解 System Prompt 系统，需要重点关注以下核心文件：
 
-| 文件 | 说明 |
-|------|------|
+| 文件                                      | 说明                                                    |
+| ----------------------------------------- | ------------------------------------------------------- |
 | `packages/opencode/src/session/system.ts` | 定义 header、provider、environment、custom 四个关键函数 |
-| `packages/opencode/src/session/prompt.ts` | Prompt 处理主文件，实现 System Prompt 注入逻辑 |
-| `packages/opencode/src/agent/agent.ts` | 定义所有内置 Agent 的配置 |
-| `packages/opencode/src/session/prompt/` | 包含所有 Provider 和 Agent 特定的提示模板 |
+| `packages/opencode/src/session/prompt.ts` | Prompt 处理主文件，实现 System Prompt 注入逻辑          |
+| `packages/opencode/src/agent/agent.ts`    | 定义内置 Agent 的配置                                   |
+| `packages/opencode/src/session/prompt/`   | 包含所有 Provider 和 Agent 特定的提示模板               |
 
 ---
 
@@ -94,46 +100,14 @@ const result = await processor.process({
 
 **SystemPrompt** 命名空间是整个 System Prompt 系统的核心，位于 `packages/opencode/src/session/system.ts`。
 
-**四个公开函数：**
+**四个核心函数：**
 
-| 函数 | 职责 |
-|------|------|
-| `header()` | 根据 Provider ID 注入特定的标识提示 |
-| `provider()` | 根据模型标识选择对应的提示模板 |
+| 函数            | 职责                                 |
+| --------------- | ------------------------------------ |
+| `header()`      | 根据 Provider ID 注入特定的标识提示  |
+| `provider()`    | 根据模型标识选择对应的提示模板       |
 | `environment()` | 收集和格式化当前运行环境的上下文信息 |
-| `custom()` | 从多个来源加载用户自定义的指令规则 |
-
-**文件导入依赖：**
-
-```typescript
-import { Ripgrep } from "../file/ripgrep"
-import { Global } from "../global"
-import { Filesystem } from "../util/filesystem"
-import { Config } from "../config/config"
-import { Instance } from "../project/instance"
-import path from "path"
-import os from "os"
-
-import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
-import PROMPT_ANTHROPIC_WITHOUT_TODO from "./prompt/qwen.txt"
-import PROMPT_BEAST from "./prompt/beast.txt"
-import PROMPT_GEMINI from "./prompt/gemini.txt"
-import PROMPT_ANTHROPIC_SPOOF from "./prompt/anthropic_spoof.txt"
-import PROMPT_CODEX from "./prompt/codex.txt"
-import type { Provider } from "@/provider/provider"
-import { Flag } from "@/flag/flag"
-
-export namespace SystemPrompt {
-  // 四个公开函数定义
-}
-```
-
-**核心依赖模块：**
-
-- **Global**：提供全局配置路径
-- **Config**：提供用户配置读取能力
-- **Instance**：提供当前项目和工作目录信息
-- **Filesystem**：提供文件系统操作能力
+| `custom()`      | 从多个来源加载用户自定义的指令规则   |
 
 ---
 
@@ -149,6 +123,7 @@ export function header(providerID: string) {
 ```
 
 **逻辑说明：**
+
 - 只有当 Provider ID 包含 `"anthropic"` 时，才返回特殊的 spoof 提示
 - 否则返回空数组
 
@@ -175,8 +150,7 @@ export async function generate(input: { description: string; model?: { providerI
 ```typescript
 export function provider(model: Provider.Model) {
   if (model.api.id.includes("gpt-5")) return [PROMPT_CODEX]
-  if (model.api.id.includes("gpt-") || model.api.id.includes("o1") || model.api.id.includes("o3"))
-    return [PROMPT_BEAST]
+  if (model.api.id.includes("gpt-") || model.api.id.includes("o1") || model.api.id.includes("o3")) return [PROMPT_BEAST]
   if (model.api.id.includes("gemini-")) return [PROMPT_GEMINI]
   if (model.api.id.includes("claude")) return [PROMPT_ANTHROPIC]
   return [PROMPT_ANTHROPIC_WITHOUT_TODO]
@@ -185,13 +159,13 @@ export function provider(model: Provider.Model) {
 
 **模型适配对照表：**
 
-| 模型系列 | 提示模板 | 说明 |
-|----------|----------|------|
-| GPT-5 / Codex | `codex.txt` | 专门的代码生成优化 |
-| GPT-4 / GPT-3.5 / o1 / o3 | `beast.txt` | OpenAI 系列通用模板 |
-| Gemini | `gemini.txt` | Google 模型专用模板 |
-| Claude | `anthropic.txt` | Anthropic 模型默认模板 |
-| 其他 | `qwen.txt` | 默认回退模板 |
+| 模型系列                  | 提示模板        | 说明                   |
+| ------------------------- | --------------- | ---------------------- |
+| GPT-5 / Codex             | `codex.txt`     | 专门的代码生成优化     |
+| GPT-4 / GPT-3.5 / o1 / o3 | `beast.txt`     | OpenAI 系列通用模板    |
+| Gemini                    | `gemini.txt`    | Google 模型专用模板    |
+| Claude                    | `anthropic.txt` | Anthropic 模型默认模板 |
+| 其他                      | `qwen.txt`      | 默认回退模板           |
 
 **核心思想**：不同模型提供商对系统提示的理解和处理方式不同，需要针对每个提供商的特点调整提示的表述方式、指令格式和风格。
 
@@ -230,12 +204,12 @@ export async function environment() {
 
 **收集的环境信息字段：**
 
-| 字段 | 说明 | 作用 |
-|------|------|------|
-| `Working directory` | 当前工作目录绝对路径 | 解析相对路径的基础 |
-| `Is directory a git repo` | 是否为 Git 仓库 | 判断是否可以使用 Git 工具 |
-| `Platform` | 运行平台标识 (darwin/linux/win32) | 生成适合当前平台的命令 |
-| `Today's date` | 当前日期 | 理解时间敏感的上下文 |
+| 字段                      | 说明                              | 作用                      |
+| ------------------------- | --------------------------------- | ------------------------- |
+| `Working directory`       | 当前工作目录绝对路径              | 解析相对路径的基础        |
+| `Is directory a git repo` | 是否为 Git 仓库                   | 判断是否可以使用 Git 工具 |
+| `Platform`                | 运行平台标识 (darwin/linux/win32) | 生成适合当前平台的命令    |
+| `Today's date`            | 当前日期                          | 理解时间敏感的上下文      |
 
 **格式化示例：**
 
@@ -261,11 +235,11 @@ export async function environment() {
 
 **加载策略分为三个层次：**
 
-| 层次 | 说明 | 优先级 |
-|------|------|--------|
-| **本地项目级** | 向上查找 AGENTS.md/CLAUDE.md/CONTEXT.md | 高 |
-| **全局用户级** | 检查全局配置目录 | 中 |
-| **配置指令** | 从 config.instructions 加载 | 低 |
+| 层次           | 说明                                    | 优先级 |
+| -------------- | --------------------------------------- | ------ |
+| **本地项目级** | 向上查找 AGENTS.md/CLAUDE.md/CONTEXT.md | 高     |
+| **全局用户级** | 检查全局配置目录                        | 中     |
+| **配置指令**   | 从 config.instructions 加载             | 低     |
 
 **文件查找配置：**
 
@@ -275,10 +249,7 @@ const LOCAL_RULE_FILES = [
   "CLAUDE.md",
   "CONTEXT.md", // deprecated
 ]
-const GLOBAL_RULE_FILES = [
-  path.join(Global.Path.config, "AGENTS.md"),
-  path.join(os.homedir(), ".claude", "CLAUDE.md")
-]
+const GLOBAL_RULE_FILES = [path.join(Global.Path.config, "AGENTS.md"), path.join(os.homedir(), ".claude", "CLAUDE.md")]
 
 if (Flag.OPENCODE_CONFIG_DIR) {
   GLOBAL_RULE_FILES.push(path.join(Flag.OPENCODE_CONFIG_DIR, "AGENTS.md"))
@@ -286,15 +257,18 @@ if (Flag.OPENCODE_CONFIG_DIR) {
 ```
 
 **本地规则加载策略：**
+
 - 从当前目录向上遍历目录树查找
 - 优先级：`AGENTS.md > CLAUDE.md > CONTEXT.md`
 - 找到第一个即停止（break）
 
 **全局规则加载策略：**
+
 - 检查所有定义的位置
 - 一旦找到任何存在的文件即停止
 
 **配置指令支持的格式：**
+
 - 本地文件路径（支持相对/绝对路径，波浪号展开）
 - glob 模式（如 `**/*.md`）
 - 远程 URL
@@ -374,6 +348,7 @@ export async function custom() {
 ```
 
 **错误处理机制**：
+
 - 文件读取失败静默返回空字符串
 - 网络请求超时静默返回空字符串
 - 最终通过 `filter(Boolean)` 过滤空值
@@ -388,18 +363,18 @@ export async function custom() {
 
 **可用模板文件：**
 
-| 文件 | 用途 |
-|------|------|
-| `anthropic.txt` | Claude 系列模型的默认提示 |
-| `beast.txt` | GPT-4/o 系列模型的提示 |
-| `gemini.txt` | Google 模型的提示 |
-| `codex.txt` | GPT-5/Codex 系列的提示 |
-| `qwen.txt` | 其他模型的默认提示 |
-| `anthropic_spoof.txt` | 针对 Anthropic 的特殊标识提示 |
-| `plan.txt` | plan agent 的提示 |
-| `explore.txt` | explore agent 的提示 |
-| `build-switch.txt` | agent 切换时的提示 |
-| `max-steps.txt` | 最大步数限制的提示 |
+| 文件                          | 用途                          |
+| ----------------------------- | ----------------------------- |
+| `anthropic.txt`               | Claude 系列模型的默认提示     |
+| `beast.txt`                   | GPT-4/o 系列模型的提示        |
+| `gemini.txt`                  | Google 模型的提示             |
+| `codex.txt`                   | GPT-5/Codex 系列的提示        |
+| `qwen.txt`                    | 其他模型的默认提示            |
+| `anthropic_spoof.txt`         | 针对 Anthropic 的特殊标识提示 |
+| `plan.txt`                    | plan agent 的提示             |
+| `explore.txt`                 | explore agent 的提示          |
+| `build-switch.txt`            | agent 切换时的提示            |
+| `max-steps.txt`               | 最大步数限制的提示            |
 | `plan-reminder-anthropic.txt` | 针对 Anthropic 的计划提醒提示 |
 
 ---
@@ -408,12 +383,12 @@ export async function custom() {
 
 **三大 Provider 模板的设计差异：**
 
-| 维度 | anthropic.txt | beast.txt | gemini.txt |
-|------|---------------|-----------|------------|
-| **风格** | 散文式结构 | 指令化 | 列表式 |
-| **长度** | 详细冗长 | 简洁直接 | 中等 |
-| **结构** | 章节分层 | 连续段落 | 规则列表 |
-| **特点** | 大量示例说明 | 强调自主性 | 明确的强制规则 |
+| 维度     | anthropic.txt | beast.txt  | gemini.txt     |
+| -------- | ------------- | ---------- | -------------- |
+| **风格** | 散文式结构    | 指令化     | 列表式         |
+| **长度** | 详细冗长      | 简洁直接   | 中等           |
+| **结构** | 章节分层      | 连续段落   | 规则列表       |
+| **特点** | 大量示例说明  | 强调自主性 | 明确的强制规则 |
 
 **三大设计考量：**
 
@@ -454,11 +429,11 @@ When the user directly asks about OpenCode (eg. "can OpenCode do...", "does Open
 
 **关键设计要点：**
 
-| 要点 | 说明 |
-|------|------|
+| 要点         | 说明                                         |
+| ------------ | -------------------------------------------- |
 | **身份定位** | 定义为"最佳编码 agent"，设定高质量输出的期望 |
-| **安全原则** | 禁止生成或猜测 URL，防止链接到恶意/失效资源 |
-| **反馈渠道** | 引导用户到 GitHub issues 页面 |
+| **安全原则** | 禁止生成或猜测 URL，防止链接到恶意/失效资源  |
+| **反馈渠道** | 引导用户到 GitHub issues 页面                |
 
 ---
 
@@ -506,6 +481,7 @@ It is critical that you mark todos as completed as soon as you are done with a t
 ```
 
 **任务管理原则：**
+
 - 频繁使用 TodoWrite 工具跟踪任务进度
 - 及时标记任务完成状态
 - 避免一次性批量标记多个任务
@@ -549,6 +525,7 @@ You CANNOT successfully complete this task without using Google to verify your u
 ```
 
 **研究原则：**
+
 - 模型知识可能过时，必须进行互联网研究
 - 不仅要搜索，还要阅读页面内容
 - 递归获取所有相关链接直到获得完整信息
@@ -590,18 +567,18 @@ You are opencode, an interactive CLI agent specializing in software engineering 
 
 **核心规则 (Core Mandates)：**
 
-| 规则 | 说明 |
-|------|------|
-| **Conventions** | 严格遵守项目现有约定 |
+| 规则                     | 说明                 |
+| ------------------------ | -------------------- |
+| **Conventions**          | 严格遵守项目现有约定 |
 | **Libraries/Frameworks** | 验证库和框架的可用性 |
-| **Style & Structure** | 模仿现有代码风格 |
-| **Idiomatic Changes** | 理解本地上下文 |
-| **Comments** | 谨慎添加注释 |
-| **Proactiveness** | 彻底完成任务 |
-| **Confirm Ambiguity** | 不确定时先确认 |
-| **Explaining Changes** | 不主动提供修改总结 |
-| **Path Construction** | 必须使用绝对路径 |
-| **Do Not revert** | 不随意回滚更改 |
+| **Style & Structure**    | 模仿现有代码风格     |
+| **Idiomatic Changes**    | 理解本地上下文       |
+| **Comments**             | 谨慎添加注释         |
+| **Proactiveness**        | 彻底完成任务         |
+| **Confirm Ambiguity**    | 不确定时先确认       |
+| **Explaining Changes**   | 不主动提供修改总结   |
+| **Path Construction**    | 必须使用绝对路径     |
+| **Do Not revert**        | 不随意回滚更改       |
 
 **结构特点**：使用核心规则的列表形式，结构清晰，便于模型逐条理解和执行。
 
@@ -615,12 +592,12 @@ You are opencode, an interactive CLI agent specializing in software engineering 
 
 **核心元素：**
 
-| 元素 | 说明 | 示例值 |
-|------|------|--------|
-| `Working directory` | 当前工作目录绝对路径 | `/Users/felix/learningspace/opencode` |
-| `Is directory a git repo` | 是否为 Git 仓库 | `yes` / `no` |
-| `Platform` | 运行平台标识 | `darwin` / `linux` / `win32` |
-| `Today's date` | 当前日期 | `Wed Jan 08 2026` |
+| 元素                      | 说明                 | 示例值                                |
+| ------------------------- | -------------------- | ------------------------------------- |
+| `Working directory`       | 当前工作目录绝对路径 | `/Users/felix/learningspace/opencode` |
+| `Is directory a git repo` | 是否为 Git 仓库      | `yes` / `no`                          |
+| `Platform`                | 运行平台标识         | `darwin` / `linux` / `win32`          |
+| `Today's date`            | 当前日期             | `Wed Jan 08 2026`                     |
 
 **格式化示例：**
 
@@ -637,6 +614,7 @@ You are opencode, an interactive CLI agent specializing in software engineering 
 ```
 
 **获取来源**：
+
 - 工作目录：`Instance.directory`
 - Git 仓库：`Instance.project.vcs`
 - 平台信息：`process.platform`
@@ -650,11 +628,11 @@ You are opencode, an interactive CLI agent specializing in software engineering 
 
 **Instance 属性说明：**
 
-| 属性 | 说明 | 类型 |
-|------|------|------|
-| `Instance.directory` | 当前工作目录绝对路径 | `string` |
-| `Instance.worktree` | Git 工作树的根目录 | `string` |
-| `Instance.project` | 当前项目配置信息 | `Project` |
+| 属性                 | 说明                 | 类型      |
+| -------------------- | -------------------- | --------- |
+| `Instance.directory` | 当前工作目录绝对路径 | `string`  |
+| `Instance.worktree`  | Git 工作树的根目录   | `string`  |
+| `Instance.project`   | 当前项目配置信息     | `Project` |
 
 **获取示例：**
 
@@ -671,11 +649,11 @@ const today = new Date().toDateString()
 
 **四大作用：**
 
-| 作用 | 说明 | 示例 |
-|------|------|------|
-| **路径解析** | 解析相对路径的基础 | 读取文件时确定绝对路径 |
-| **工具选择** | 根据平台生成正确的命令 | `bash` vs `PowerShell` |
-| **时间感知** | 理解时间敏感的上下文 | 生成符合当前日期的代码 |
+| 作用         | 说明                      | 示例                       |
+| ------------ | ------------------------- | -------------------------- |
+| **路径解析** | 解析相对路径的基础        | 读取文件时确定绝对路径     |
+| **工具选择** | 根据平台生成正确的命令    | `bash` vs `PowerShell`     |
+| **时间感知** | 理解时间敏感的上下文      | 生成符合当前日期的代码     |
 | **能力判断** | 判断是否可以使用 Git 工具 | 非 Git 仓库不尝试 Git 操作 |
 
 **具体应用场景：**
@@ -693,12 +671,12 @@ const today = new Date().toDateString()
 
 **四个主要渠道：**
 
-| 渠道 | 说明 | 配置位置 |
-|------|------|----------|
-| **本地项目级** | 查找 AGENTS.md / CLAUDE.md / CONTEXT.md | 项目根目录或父目录 |
-| **全局用户级** | 查找全局配置目录 | `~/.claude/` 或配置目录 |
-| **配置指令** | config.instructions 配置项 | opencode.json |
-| **环境变量** | OPENCODE_CONFIG_DIR | 环境变量 |
+| 渠道           | 说明                                    | 配置位置                |
+| -------------- | --------------------------------------- | ----------------------- |
+| **本地项目级** | 查找 AGENTS.md / CLAUDE.md / CONTEXT.md | 项目根目录或父目录      |
+| **全局用户级** | 查找全局配置目录                        | `~/.claude/` 或配置目录 |
+| **配置指令**   | config.instructions 配置项              | opencode.json           |
+| **环境变量**   | OPENCODE_CONFIG_DIR                     | 环境变量                |
 
 **加载优先级**：本地 > 全局 > 配置指令
 
@@ -708,10 +686,10 @@ const today = new Date().toDateString()
 
 **核心工具函数：**
 
-| 函数 | 作用 |
-|------|------|
+| 函数                  | 作用                       |
+| --------------------- | -------------------------- |
 | `Filesystem.findUp()` | 向上遍历目录树查找目标文件 |
-| `Filesystem.globUp()` | 支持 glob 模式的文件查找 |
+| `Filesystem.globUp()` | 支持 glob 模式的文件查找   |
 
 **查找行为：**
 
@@ -744,6 +722,7 @@ fetch(url, { signal: AbortSignal.timeout(5000) })
 ```
 
 **特点**：
+
 - 失败后返回空字符串，最终被过滤掉
 - 一个来源加载失败不影响其他来源
 
@@ -769,7 +748,7 @@ fetch(url, { signal: AbortSignal.timeout(5000) })
 
 **核心逻辑**：在主循环中，System Prompt 的注入发生在 `processor.process` 方法调用时。
 
-**注入代码** (`packages/opencode/src/session/prompt.ts:591-610`)：
+**注入代码**（见 `packages/opencode/src/session/prompt.ts`）：
 
 ```typescript
 const result = await processor.process({
@@ -796,12 +775,12 @@ const result = await processor.process({
 
 **参数说明：**
 
-| 参数 | 说明 |
-|------|------|
-| `system` | `environment()` 和 `custom()` 两部分的合并结果 |
-| `messages` | 会话消息数组，转换为模型格式 |
-| `tools` | 当前会话可用的工具定义 |
-| `model` | 模型配置信息 |
+| 参数       | 说明                                           |
+| ---------- | ---------------------------------------------- |
+| `system`   | `environment()` 和 `custom()` 两部分的合并结果 |
+| `messages` | 会话消息数组，转换为模型格式                   |
+| `tools`    | 当前会话可用的工具定义                         |
+| `model`    | 模型配置信息                                   |
 
 **system 参数**：接收 `environment()` 和 `custom()` 两部分的合并结果，作为系统消息传递给模型。
 
@@ -812,6 +791,7 @@ const result = await processor.process({
 **SessionProcessor**：处理与模型实际交互的核心组件
 
 **职责**：
+
 - 接收所有必要的信息（用户消息、系统提示、工具定义、模型配置等）
 - 构造和发送请求到模型提供商
 
@@ -850,6 +830,7 @@ const processor = SessionProcessor.create({
 ```
 
 **初始化信息**：
+
 - 记录交互状态和结果
 - 跟踪成本、令牌使用、工具调用等信息
 
@@ -877,12 +858,13 @@ messages: [
 
 **消息来源**：
 
-| 消息类型 | 说明 |
-|----------|------|
+| 消息类型          | 说明                                        |
+| ----------------- | ------------------------------------------- |
 | `sessionMessages` | 会话中所有消息（用户消息 + assistant 消息） |
-| `MAX_STEPS` | 最后一步时的总结提示 |
+| `MAX_STEPS`       | 最后一步时的总结提示                        |
 
 **系统消息传递**：
+
 - 通过 `system` 参数单独传递
 - 符合 OpenAI/Anthropic API 的消息格式要求
 
@@ -906,6 +888,7 @@ const tools = await resolveTools({
 ```
 
 **处理步骤**：
+
 1. 从 `ToolRegistry` 获取可用工具
 2. 根据当前 Agent 和模型配置进行过滤
 3. 转换为模型可理解的格式（JSON Schema）
@@ -979,13 +962,13 @@ export const Info = z
 
 **关键属性说明：**
 
-| 属性 | 类型 | 说明 |
-|------|------|------|
-| `name` | string | Agent 名称 |
-| `mode` | enum | 模式：subagent / primary / all |
-| `prompt` | string | Agent 特定提示 |
-| `permission` | Ruleset | 权限配置 |
-| `steps` | int | 最大步数限制 |
+| 属性         | 类型    | 说明                           |
+| ------------ | ------- | ------------------------------ |
+| `name`       | string  | Agent 名称                     |
+| `mode`       | enum    | 模式：subagent / primary / all |
+| `prompt`     | string  | Agent 特定提示                 |
+| `permission` | Ruleset | 权限配置                       |
+| `steps`      | int     | 最大步数限制                   |
 
 ---
 
@@ -993,11 +976,11 @@ export const Info = z
 
 **内置 Agent 列表：**
 
-| Agent | 模式 | 用途 |
-|-------|------|------|
-| `build` | primary | 默认的主要开发 Agent |
-| `plan` | primary | 只读计划模式 |
-| `explore` | subagent | 代码探索专用 Agent |
+| Agent     | 模式     | 用途                 |
+| --------- | -------- | -------------------- |
+| `build`   | primary  | 默认的主要开发 Agent |
+| `plan`    | primary  | 只读计划模式         |
+| `explore` | subagent | 代码探索专用 Agent   |
 
 ---
 
@@ -1014,6 +997,7 @@ build: {
 ```
 
 **特点**：
+
 - 没有额外的 `prompt` 属性
 - 只使用 System Prompt（Provider 提示、环境信息、自定义规则）
 - 具有完整的权限（除 doom_loop 和 external_directory 需询问）
@@ -1042,6 +1026,7 @@ plan: {
 ```
 
 **特点**：
+
 - 禁止所有编辑操作
 - 只允许在 `.opencode/plan/` 目录下创建文件
 - 只能用于规划和阅读，不能直接修改代码库
@@ -1077,6 +1062,7 @@ explore: {
 ```
 
 **特点**：
+
 - 有专门的 `prompt` 属性（引用 `prompt/explore.txt`）
 - 权限限制为只读操作
 - 禁止其他所有操作（编辑、bash 执行等）
@@ -1087,10 +1073,10 @@ explore: {
 
 **两种注入方式：**
 
-| 方式 | 说明 | 优点 |
-|------|------|------|
-| **Agent 定义** | 在 Agent 配置中设置 `prompt` 属性 | 简单直接 |
-| **insertReminders** | 在用户消息中添加合成文本 | 可被上下文压缩处理 |
+| 方式                | 说明                              | 优点               |
+| ------------------- | --------------------------------- | ------------------ |
+| **Agent 定义**      | 在 Agent 配置中设置 `prompt` 属性 | 简单直接           |
+| **insertReminders** | 在用户消息中添加合成文本          | 可被上下文压缩处理 |
 
 **方式一：Agent 定义设置**
 
@@ -1130,15 +1116,15 @@ function insertReminders(input: { messages: MessageV2.WithParts[]; agent: Agent.
 
 **支持的配置属性：**
 
-| 属性 | 说明 |
-|------|------|
-| `model` | 指定使用的模型 |
-| `prompt` | 指定 Agent 提示 |
-| `description` | Agent 描述 |
-| `temperature` | 温度参数 |
-| `mode` | 模式 |
-| `steps` | 最大步数 |
-| `permission` | 权限配置 |
+| 属性          | 说明            |
+| ------------- | --------------- |
+| `model`       | 指定使用的模型  |
+| `prompt`      | 指定 Agent 提示 |
+| `description` | Agent 描述      |
+| `temperature` | 温度参数        |
+| `mode`        | 模式            |
+| `steps`       | 最大步数        |
+| `permission`  | 权限配置        |
 
 **配置加载逻辑：**
 
@@ -1251,11 +1237,11 @@ for (const [key, value] of Object.entries(cfg.agent ?? {})) {
 
 **Agent 特点：**
 
-| 特性 | 说明 |
-|------|------|
-| 模式 | subagent（不能被用户直接调用） |
-| 权限 | 只读操作（read、grep、glob、list） |
-| 步数限制 | 50 步 |
+| 特性     | 说明                               |
+| -------- | ---------------------------------- |
+| 模式     | subagent（不能被用户直接调用）     |
+| 权限     | 只读操作（read、grep、glob、list） |
+| 步数限制 | 50 步                              |
 
 **调用方式**：`@review 请审查 src/utils/ 目录下的代码`
 
@@ -1290,11 +1276,11 @@ my-project/
 
 **方法列表：**
 
-| 方法 | 说明 |
-|------|------|
+| 方法             | 说明                                |
+| ---------------- | ----------------------------------- |
 | **检查日志输出** | 开发模式下会输出 System Prompt 组成 |
 | **检查规则加载** | 在 Filesystem.findUp 调用处添加日志 |
-| **检查消息内容** | 查看 Session 中存储的系统消息 |
+| **检查消息内容** | 查看 Session 中存储的系统消息       |
 
 **调试代码示例：**
 
@@ -1326,6 +1312,7 @@ export function provider(model: Provider.Model) {
 **步骤三**：创建提示模板
 
 创建 `prompt/new-provider.txt`，包含：
+
 - 模型身份定位
 - 行为规范
 - 工具使用说明
@@ -1347,11 +1334,11 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 
 **实现方法：**
 
-| 方法 | 说明 |
-|------|------|
+| 方法         | 说明                                       |
+| ------------ | ------------------------------------------ |
 | **配置指令** | config.instructions 包含动态生成的文件路径 |
-| **环境变量** | OPENCODE_CONFIG_DIR 指向不同的配置目录 |
-| **修改源码** | 直接修改 system.ts 中的 custom 函数 |
+| **环境变量** | OPENCODE_CONFIG_DIR 指向不同的配置目录     |
+| **修改源码** | 直接修改 system.ts 中的 custom 函数        |
 
 ---
 
@@ -1359,11 +1346,11 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 
 **实现方式：**
 
-| 方式 | 说明 |
-|------|------|
-| **文件条件** | 在 AGENTS.md 中包含条件逻辑 |
-| **Agent 切换** | 创建不同的 Agent 配置 |
-| **配置分离** | 通过环境变量切换不同配置文件 |
+| 方式           | 说明                         |
+| -------------- | ---------------------------- |
+| **文件条件**   | 在 AGENTS.md 中包含条件逻辑  |
+| **Agent 切换** | 创建不同的 Agent 配置        |
+| **配置分离**   | 通过环境变量切换不同配置文件 |
 
 ---
 
@@ -1371,9 +1358,9 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 
 **实现方法：**
 
-| 方法 | 说明 | 优点 |
-|------|------|------|
-| **修改提示模板** | 创建不同语言的提示模板文件 | 完全定制 |
+| 方法               | 说明                            | 优点           |
+| ------------------ | ------------------------------- | -------------- |
+| **修改提示模板**   | 创建不同语言的提示模板文件      | 完全定制       |
 | **使用自定义规则** | 在 AGENTS.md 中添加语言指导规则 | 不需要修改源码 |
 
 **示例规则**：`使用中文回复`
@@ -1384,11 +1371,11 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 
 **集成方式：**
 
-| 方式 | 说明 | 复杂度 |
-|------|------|--------|
-| **配置指令 URL** | 指向外部规则文件的 URL | 低 |
-| **修改 custom 函数** | 从数据库或 API 获取规则 | 高 |
-| **文件监控** | 外部系统重写 AGENTS.md | 中 |
+| 方式                 | 说明                    | 复杂度 |
+| -------------------- | ----------------------- | ------ |
+| **配置指令 URL**     | 指向外部规则文件的 URL  | 低     |
+| **修改 custom 函数** | 从数据库或 API 获取规则 | 高     |
+| **文件监控**         | 外部系统重写 AGENTS.md  | 中     |
 
 ---
 
@@ -1396,12 +1383,12 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 
 **优化建议：**
 
-| 建议 | 说明 |
-|------|------|
-| **减少规则文件数量** | 合并相关规则到少数几个文件 |
-| **使用简单的 glob 模式** | 避免复杂的文件匹配 |
-| **缓存远程内容** | 减少网络请求 |
-| **限制规则文件大小** | 控制上下文长度 |
+| 建议                     | 说明                       |
+| ------------------------ | -------------------------- |
+| **减少规则文件数量**     | 合并相关规则到少数几个文件 |
+| **使用简单的 glob 模式** | 避免复杂的文件匹配         |
+| **缓存远程内容**         | 减少网络请求               |
+| **限制规则文件大小**     | 控制上下文长度             |
 
 ---
 
@@ -1413,13 +1400,13 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 
 **排查步骤：**
 
-| 步骤 | 检查项 | 说明 |
-|------|--------|------|
-| 1 | 文件位置和名称 | 确保 AGENTS.md 位于正确的目录 |
-| 2 | 文件格式 | 确认是有效的文本文件，不是二进制 |
-| 3 | 加载时机 | 修改后需要重新启动会话 |
-| 4 | 配置冲突 | 检查 ~/.claude/CLAUDE.md 是否覆盖项目配置 |
-| 5 | 调试日志 | 查看规则文件是否被正确找到和加载 |
+| 步骤 | 检查项         | 说明                                      |
+| ---- | -------------- | ----------------------------------------- |
+| 1    | 文件位置和名称 | 确保 AGENTS.md 位于正确的目录             |
+| 2    | 文件格式       | 确认是有效的文本文件，不是二进制          |
+| 3    | 加载时机       | 修改后需要重新启动会话                    |
+| 4    | 配置冲突       | 检查 ~/.claude/CLAUDE.md 是否覆盖项目配置 |
+| 5    | 调试日志       | 查看规则文件是否被正确找到和加载          |
 
 **支持的规则文件**：`AGENTS.md` / `CLAUDE.md` / `CONTEXT.md`
 
@@ -1439,6 +1426,7 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 ### 10.3 规则文件冲突
 
 **加载策略**：
+
 - 本地域查找：`AGENTS.md > CLAUDE.md > CONTEXT.md`
 - 找到第一个即停止，不会加载同级别的其他文件
 
@@ -1449,15 +1437,18 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 ### 10.4 远程规则加载失败
 
 **可能原因**：
+
 - 网络连接问题
 - URL 不存在或返回错误
 - 超时
 
 **处理方式**：
+
 - 静默失败（返回空字符串，最终被过滤掉）
 - 一个 URL 加载失败不影响其他规则
 
 **验证方法**：
+
 - 使用 curl 测试 URL 可用性
 - 查看网络请求日志
 - 临时替换为本地文件路径测试
@@ -1468,12 +1459,12 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 
 **排查步骤：**
 
-| 步骤 | 检查项 |
-|------|--------|
-| 1 | JSON 配置格式（prompt 属性是有效的字符串） |
-| 2 | Agent 名称（配置的名称与调用的一致） |
-| 3 | 属性覆盖逻辑（不会覆盖从外部文件导入的 prompt） |
-| 4 | Agent 加载（确认自定义 Agent 已被正确加载） |
+| 步骤 | 检查项                                          |
+| ---- | ----------------------------------------------- |
+| 1    | JSON 配置格式（prompt 属性是有效的字符串）      |
+| 2    | Agent 名称（配置的名称与调用的一致）            |
+| 3    | 属性覆盖逻辑（不会覆盖从外部文件导入的 prompt） |
+| 4    | Agent 加载（确认自定义 Agent 已被正确加载）     |
 
 ---
 
@@ -1481,12 +1472,12 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 
 **优化建议：**
 
-| 建议 | 说明 |
-|------|------|
-| 精简内容 | 只保留必要的规则 |
+| 建议         | 说明                 |
+| ------------ | -------------------- |
+| 精简内容     | 只保留必要的规则     |
 | 移除过时规则 | 删除已不再适用的规则 |
-| 简洁表达 | 使用简洁的语言 |
-| 文档分离 | 将详细规范独立出来 |
+| 简洁表达     | 使用简洁的语言       |
+| 文档分离     | 将详细规范独立出来   |
 
 **补充方案**：使用上下文压缩功能（OpenCode 会自动压缩过长的上下文）
 
@@ -1498,15 +1489,15 @@ import PROMPT_NEW_PROVIDER from "./prompt/new-provider.txt"
 
 ### 附录一、关键文件路径速查
 
-| 分类 | 文件 | 路径 | 说明 |
-|------|------|------|------|
-| **核心模块** | SystemPrompt 核心 | `packages/opencode/src/session/system.ts` | 定义 prompt 加载逻辑 |
-| | Prompt 处理 | `packages/opencode/src/session/prompt.ts` | System Prompt 注入点 |
-| | Agent 定义 | `packages/opencode/src/agent/agent.ts` | Agent 配置和默认提示 |
-| **提示模板** | Anthropic 模板 | `packages/opencode/src/session/prompt/anthropic.txt` | Claude 系列模型提示 |
-| | Beast 模板 | `packages/opencode/src/session/prompt/beast.txt` | GPT 系列模型提示 |
-| | Gemini 模板 | `packages/opencode/src/session/prompt/gemini.txt` | Google 模型提示 |
-| | Explore Agent | `packages/opencode/src/agent/prompt/explore.txt` | Explore Agent 专用提示 |
+| 分类         | 文件              | 路径                                                 | 说明                   |
+| ------------ | ----------------- | ---------------------------------------------------- | ---------------------- |
+| **核心模块** | SystemPrompt 核心 | `packages/opencode/src/session/system.ts`            | 定义 prompt 加载逻辑   |
+|              | Prompt 处理       | `packages/opencode/src/session/prompt.ts`            | System Prompt 注入点   |
+|              | Agent 定义        | `packages/opencode/src/agent/agent.ts`               | Agent 配置和默认提示   |
+| **提示模板** | Anthropic 模板    | `packages/opencode/src/session/prompt/anthropic.txt` | Claude 系列模型提示    |
+|              | Beast 模板        | `packages/opencode/src/session/prompt/beast.txt`     | GPT 系列模型提示       |
+|              | Gemini 模板       | `packages/opencode/src/session/prompt/gemini.txt`    | Google 模型提示        |
+|              | Explore Agent     | `packages/opencode/src/agent/prompt/explore.txt`     | Explore Agent 专用提示 |
 
 ---
 
@@ -1544,10 +1535,10 @@ bun test
 
 ### 附录三、相关资源
 
-| 资源 | 链接 |
-|------|------|
-| OpenCode GitHub | https://github.com/anomalyco/opencode |
-| OpenCode 文档 | https://opencode.ai/docs |
-| 问题反馈 | https://github.com/anomalyco/opencode/issues |
+| 资源            | 链接                                         |
+| --------------- | -------------------------------------------- |
+| OpenCode GitHub | https://github.com/anomalyco/opencode        |
+| OpenCode 文档   | https://opencode.ai/docs                     |
+| 问题反馈        | https://github.com/anomalyco/opencode/issues |
 
 ---
