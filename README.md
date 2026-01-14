@@ -8,26 +8,38 @@ OpenCode 是一个优秀的开源 Coding Agent, **Agent**、**Tool**、**Permiss
 
 我也在做Agent开发相关的工作，但是做的远没有OpenCode全面和深入，所以在学习它的实现，顺便写了这个教程。
 
-**这个教程大部分内容都是由OpenCode/Claude Code/Codex等AI Coding Agent生成**，
-我目前只做了大概的review，后面会在实际学习过程中逐渐更新相关教程。
+**得益于现在AI和各种编程工具的强大，我们自己开发Agent的时候，可以把OpenCode的代码发给AI参考，所以本教程致力于梳理OpenCode的核心架构和关键概念，并不会详细深入代码细节，学习的时候需要搭配OpenCode源码一起阅读。**
 
-**如果介意内容是AI生成的，请不要继续阅读。（虽然是AI生成的,质量还是非常好的）**
+**本教程主要使用OpenCode/Claude Code/Codex等工具生成，人工review。**
+
+## 这不是从0开始的教程
+
+首先这不是一套“从 0 开始教你写 Agent”的教程，而是一套**基于优秀开源Agent项目的拆解**，你至少具备以下两个条件：
+
+1. 使用任何一款coding agent做过至少一个项目或者工具，哪怕是给自己使用的也行
+2. 熟悉任何一门编程语言
+
+这个教程更适合下面这些场景：
+
+* 已经用过 Claude Code / Codex / OpenCode等coding agent，想知道它们**内部是怎么工作的**
+* 想自己实现一个 **可控的 Coding Agent 或者其他类型的Agent**
+* 对 Agent 的权限 / Tool / Session / Prompt 这些模块有真实工程需求
 
 ---
 
 ## 教程列表
 
-| 序号 | 教程 | 说明 | 难度 |
-|------|------|------|------|
-| 00 | [学习规划](00_OPENCODE_LEARNING_PLAN.md) | 完整的架构学习路线图 | - |
-| 01 | [System Prompt 系统](01_SYSTEM_PROMPT_TUTORIAL.md) | Prompt 构建、Provider 适配、环境注入 | ⭐⭐ |
-| 02 | [权限审核系统](02_PERMISSION_SYSTEM_TUTORIAL.md) | 权限规则、请求流程、BashArity | ⭐⭐⭐ |
-| 03 | [Agent 系统](03_AGENT_SYSTEM_TUTORIAL.md) | 内置 Agent、配置系统、权限集成 | ⭐⭐ |
-| 04 | [Tool 系统](04_TOOL_SYSTEM_TUTORIAL.md) | 工具定义、注册、执行流程 | ⭐⭐⭐ |
-| 05 | [迭代信息收集模式](05_ITERATIVE_INFO_GATHERING_TUTORIAL.md) | 核心循环、Tool Chaining、Explore Agent | ⭐⭐⭐⭐ |
-| 06 | [Skill 系统](06_SKILL_SYSTEM_TUTORIAL.md) | Skill 定义、发现机制、工具集成 | ⭐⭐ |
-| 07 | [Session 系统](07_SESSION_SYSTEM_TUTORIAL.md) | 会话管理、消息流转、上下文压缩 | ⭐⭐⭐ |
-| 08 | [Provider 系统](08_PROVIDER_SYSTEM_TUTORIAL.md) | 多模型适配、SDK 初始化、成本计算 | ⭐⭐⭐ |
+| 序号  | 教程                                                  | 说明                               |  难度  | 人工review | Reviewer  | 备注  |
+| --- | --------------------------------------------------- | -------------------------------- | :--: | :------: | :-------: | --- |
+| 00  | [学习规划](00_OPENCODE_LEARNING_PLAN.md)                | 完整的架构学习路线图                       |  -   |    ✅     | @yexia553 | -   |
+| 01  | [System Prompt 系统](01_SYSTEM_PROMPT_TUTORIAL.md)    | Prompt 构建、Provider 适配、环境注入       |  ⭐⭐  |    ✅     | @yexia553 |     |
+| 02  | [权限审核系统](02_PERMISSION_SYSTEM_TUTORIAL.md)          | 权限规则、请求流程、BashArity              | ⭐⭐⭐  |          |           |     |
+| 03  | [Agent 系统](03_AGENT_SYSTEM_TUTORIAL.md)             | 内置 Agent、配置系统、权限集成               |  ⭐⭐  |          |           |     |
+| 04  | [Tool 系统](04_TOOL_SYSTEM_TUTORIAL.md)               | 工具定义、注册、执行流程                     | ⭐⭐⭐  |          |           |     |
+| 05  | [迭代信息收集模式](05_ITERATIVE_INFO_GATHERING_TUTORIAL.md) | 核心循环、Tool Chaining、Explore Agent | ⭐⭐⭐⭐ |          |           |     |
+| 06  | [Skill 系统](06_SKILL_SYSTEM_TUTORIAL.md)             | Skill 定义、发现机制、工具集成               |  ⭐⭐  |          |           |     |
+| 07  | [Session 系统](07_SESSION_SYSTEM_TUTORIAL.md)         | 会话管理、消息流转、上下文压缩                  | ⭐⭐⭐  |          |           |     |
+| 08  | [Provider 系统](08_PROVIDER_SYSTEM_TUTORIAL.md)       | 多模型适配、SDK 初始化、成本计算               | ⭐⭐⭐  |          |           |     |
 
 
 ---
@@ -35,33 +47,53 @@ OpenCode 是一个优秀的开源 Coding Agent, **Agent**、**Tool**、**Permiss
 ## 核心架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        OpenCode 架构                             │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────┐    ┌──────────────────┐    ┌─────────────┐    │
-│  │   CLI/TUI   │───▶│   Agent System   │───▶│  Provider   │    │
-│  └─────────────┘    └────────┬─────────┘    └─────────────┘    │
-│                              │                                    │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              迭代信息收集循环 (核心灵魂)                   │   │
-│  │   while (true) {                                         │   │
-│  │     LLM 分析 → 探索收集 → 评估决策 → 继续/结束            │   │
-│  │   }                                                      │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                              │                                    │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
-│  │    Tool     │  │  Permission │  │   Session   │             │
-│  │   System    │  │   System    │  │   System    │             │
-│  └─────────────┘  └─────────────┘  └─────────────┘             │
-│                              │                                    │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
-│  │    Skill    │  │  System     │  │   LLM       │             │
-│  │   System    │  │   Prompt    │  │  Provider   │             │
-│  └─────────────┘  └─────────────┘  └─────────────┘             │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+Clients:  TUI/CLI   IDE插件/Web   桌面App
+              │          │            │
+              └─────> OpenCode Server (Hono: HTTP/OpenAPI/SSE/WebSocket)
+                            │
+                         Global Bus
+                            │
+                    ┌──── Session Engine ────┐
+                    │                        │
+          Config Loader              Storage & Snapshots
+     (project/user/env)              (messages/diffs/share)
+                    │                        │
+                    ├─> Agent Registry (build / plan / general)
+                    ├─> System Prompt Builder
+                    └─ Tool Registry <──────────┐
+                            │                   │
+                            │ tool-calls        │ session updates
+                            ▼                   │
+                   LLM Orchestrator ──> Provider Adapter ──> Models (Claude/OpenAI/…)
+                            │
+                            ├─> PermissionNext (allow/ask/deny) ──> Global Bus
+                            ├─> Worktree/File IO + Shell/Pty + LSP
+                            ├─> MCP Servers & Plugins
+                            └─> Session Engine (write parts/results)
 ```
+
+核心执行流程概述：
+- 客户端（TUI/IDE/Web/桌面）通过 SDK 调用本地或远程 Hono Server，事件使用 SSE/WebSocket。
+- Server 路由到 Session Engine，加载 Config/Project，创建或恢复 Session，并将事件透传 Global Bus。
+- Session Engine 依据 Agent/Permission 构建 System Prompt，调用 LLM，处理工具调用（`ToolRegistry`）并进行权限拦截（`PermissionNext`）。
+- 工具执行文件读写、Pty/Bash、LSP、MCP 等操作，结果写回 Session，快照/存储模块维护消息、diff 和分享信息。
+- 事件和权限请求通过 Bus 推送给客户端，形成可观察的迭代循环。
+
+---
+
+## 组件职责速览
+
+| 组件 | 职责 | 关键文件 |
+|------|------|----------|
+| CLI/TUI | 用户入口，命令解析 | `cli/index.ts`, `cli/cmd/run.ts` |
+| Config | 多层配置管理 | `config/config.ts` |
+| Session | 会话管理、核心执行循环 | `session/processor.ts`, `session/index.ts` |
+| Agent | 智能体定义和配置 | `agent/agent.ts`, `agent/index.ts` |
+| Tool | 20+ 工具实现 | `tool/tool.ts`, `tool/registry.ts` |
+| Permission | 权限控制 | `permission/next.ts` |
+| Provider | LLM提供商集成 | `provider/provider.ts` |
+| Skill | 技能管理 | `skill/skill.ts`, `skill/index.ts` |
+| Event Bus | 事件通信 | `bus/index.ts`, `bus/global.ts` |
 
 ---
 
@@ -123,7 +155,7 @@ Session 管理对话的生命周期：
 
 ## 许可证
 
-MIT
+[CC BY-NC 4.0](LICENSE)
 
 ---
 
